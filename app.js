@@ -52,6 +52,11 @@ app.use('/live', (request, response) => {
   return response.sendStatus(200);
 });
 
+app.use((err, req, res, next) => {
+  console.error(err.stack)
+  res.status(500).send('Something broken!')
+})
+
 db.init().then(() => {
   logger.info('Database init\'d');
 }).catch(error => {
