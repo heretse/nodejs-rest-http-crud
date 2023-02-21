@@ -17,16 +17,14 @@
  *  limitations under the License.
  *
  */
+const trace = require('./tracing.js');
 
 const logger = require('./logger.js');
 const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
-
 const app = express();
-
 const db = require('./lib/db');
-
 const fruits = require('./lib/routes/fruits');
 
 app.use(bodyParser.json());
@@ -53,7 +51,9 @@ app.use('/live', (request, response) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error(err.stack)
+  // console.error(err.stack)
+  const activeSpan = trace.getActiveSpan();
+  activeSpan.recordException(err);
   res.status(500).send('Something broken!')
 })
 

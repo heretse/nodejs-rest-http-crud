@@ -1,35 +1,89 @@
-const { Resource } = require('@opentelemetry/resources');
-const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
-const { trace } = require('@opentelemetry/api');
-const { JaegerExporter } = require('@opentelemetry/exporter-jaeger');
+'use strict';
+
+const { diag, trace, DiagConsoleLogger, DiagLogLevel } = require('@opentelemetry/api');
+
+// SDK
+const opentelemetry = require('@opentelemetry/sdk-node');
+
+// Express, postgres and http instrumentation
+// const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
+// const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
 const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
 const { PgInstrumentation } = require('@opentelemetry/instrumentation-pg');
-const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 
-const exporter = new JaegerExporter({
-  endpoint: 'http://jaeger-all-in-one-inmemory-collector.opentelemetry-js-rhosdt.svc:14268/api/traces'
-});
+// Collector trace exporter
+const { Resource } = require('@opentelemetry/resources');
+const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
+// const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+// const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
+const grpc = require("@grpc/grpc-js");
+const { CollectorTraceExporter } = require("@opentelemetry/exporter-collector-grpc");
 
-const provider = new NodeTracerProvider({
+diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG);
+
+// Tracer provider
+// const provider = new NodeTracerProvider({
+//   resource: new Resource({ [SemanticResourceAttributes.SERVICE_NAME]: 'fruits' })
+// });
+
+// registerInstrumentations({
+//   instrumentations: [
+//     // Currently to be able to have auto-instrumentation for express
+//     // We need the auto-instrumentation for HTTP.
+//     new HttpInstrumentation(),
+//     new ExpressInstrumentation(),
+//     new PgInstrumentation()
+//   ]
+// });
+
+// Tracer exporter
+// const traceExporter = new OTLPTraceExporter({ url: 'http://localhost:/v1/traces' });
+// provider.addSpanProcessor(new SimpleSpanProcessor(traceExporter));
+// provider.register();
+
+var meta = new grpc.Metadata();
+meta.add("x-sls-otel-project", "express-web");
+const collectorOptions = {
+  url: "http://192.168.80.8:55680",
+  metadata: meta,
+};
+const traceExporter = new CollectorTraceExporter(collectorOptions);
+
+// SDK configuration and start up
+const sdk = new opentelemetry.NodeSDK({
   resource: new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]: 'nodejs-rest-http-crud'
-  })
-});
-
-provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
-
-provider.register();
-
-registerInstrumentations({
+    [SemanticResourceAttributes.SERVICE_NAME]: 'express-web',
+  }),
+  traceExporter: traceExporter,
   instrumentations: [
     new HttpInstrumentation(),
     new ExpressInstrumentation(),
-    new PgInstrumentation()
-  ],
-  tracerProvider: provider
+    new PgInstrumentation(),
+    getNodeAutoInstrumentations()
+  ]
 });
 
-trace.getTracer('nodejs-rest-http-crud');
+(async () => {
+  try {
+    await sdk.start();
+    console.log('Tracing started.');
+  } catch (error) {
+    console.error(error);
+  }
+})();
+
+// For local development to stop the tracing using Control+c
+process.on('SIGINT', async () => {
+  try {
+    await sdk.shutdown();
+    console.log('Tracing finished.');
+  } catch (error) {
+    console.error(error);
+  } finally {
+    process.exit(0);
+  }
+});
+
+module.exports = trace;
